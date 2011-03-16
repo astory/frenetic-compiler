@@ -86,20 +86,37 @@ let rec typecheck_exp gamma expr =
       let gamma' = munion info [gamma1; gamma2] in
       (gamma', constraints', resultant_type)
     | EFun (info, param, expr) -> (gamma, ConstraintSet.empty, TUnit)
-    | ELet (info, bind, expr) -> (gamma, ConstraintSet.empty, TUnit)
+    | ELet (info, bind, expr) ->
+      match bind with
+        | Bind (info, pattern, typ, expr') ->
+          let (gamma', constraints, expr'_t) = typecheck_exp gamma expr' in
+          match pattern with
+            | PVar (_, Id(info, mo, s), _) ->
+              let gamma' = StringMap.add s expr'_t in
+              typecheck_exp gamma' expr
+            | _ -> raise TypeException(info, "pattern not a variable")
     | EAsc (info, expr, typ) ->
       let (gamma', constraints, expr_t) = typecheck_exp gamma expr in
       (gamma',
         cunion [constraints; ConstraintSet.singleton((expr_t, typ))],
         expr_t)
     | EOver (info, op, exprs) -> (gamma, ConstraintSet.empty, TUnit)
-    | EPair (info, expr1, expr2) -> (gamma, ConstraintSet.empty, TUnit)
+
+    | EPair (info, expr1, expr2) ->
+      let (gamma1, constraints1, typ1) =
+          typecheck_exp gamma expr1 in
+      let (gamma2, constraints2, typ2) =
+          typecheck_exp gamma expr2 in
+      (munion info [gamma1; gamma2],
+        cunion [constraints1; constraints2]
+        Tproduct (typ1, typ2))
     | ECase (info, expr1, pat_exprs) -> (gamma, ConstraintSet.empty, TUnit)
+
     | EUnit (info) -> (gamma, ConstraintSet.empty, TUnit)
-    | EInteger (info, value) -> (gamma, ConstraintSet.empty, TUnit)
-    | EChar (info, value) -> (gamma, ConstraintSet.empty, TUnit)
-    | EString (info, value) -> (gamma, ConstraintSet.empty, TUnit)
-    | EBool (info, value) -> (gamma, ConstraintSet.empty, TUnit)
+    | EBool (info, value) -> (gamma, ConstraintSet.empty, TBool)
+    | EInteger (info, value) -> (gamma, ConstraintSet.empty, TInteger)
+    | EChar (info, value) -> (gamma, ConstraintSet.empty, TChar)
+    | EString (info, value) -> (gamma, ConstraintSet.empty, TString)
 
 let typecheck_decl (gamma, constraints) decl =
   match decl with
