@@ -87,7 +87,11 @@ let rec typecheck_exp gamma expr =
       (gamma', constraints', resultant_type)
     | EFun (info, param, expr) -> (gamma, ConstraintSet.empty, TUnit)
     | ELet (info, bind, expr) -> (gamma, ConstraintSet.empty, TUnit)
-    | EAsc (info, expr, typ) -> (gamma, ConstraintSet.empty, TUnit)
+    | EAsc (info, expr, typ) ->
+      let (gamma', constraints, expr_t) = typecheck_exp gamma expr in
+      (gamma',
+        cunion [constraints; ConstraintSet.singleton((expr_t, typ))],
+        expr_t)
     | EOver (info, op, exprs) -> (gamma, ConstraintSet.empty, TUnit)
     | EPair (info, expr1, expr2) -> (gamma, ConstraintSet.empty, TUnit)
     | ECase (info, expr1, pat_exprs) -> (gamma, ConstraintSet.empty, TUnit)
