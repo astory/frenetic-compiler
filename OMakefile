@@ -68,7 +68,7 @@ FRENETIC_BASE_SOURCES[] = \
     pretty.mli pretty.ml \
     prefs.mli prefs.ml \
     parser.mly lexer.mll \
-    toplevel.ml 
+    toplevel.ml typechecker.ml
 
 FRENETIC_SOURCES = $(file $(FRENETIC_BASE_SOURCES)) frenetic.ml
 
