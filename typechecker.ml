@@ -48,33 +48,20 @@ let fresh () =
 let cunion =
   List.fold_left (ConstraintSet.union) ConstraintSet.empty
 
-(* TODO(astory): determine how best to do this *)
-let munion' info map1 map2 =
-  let add_item k v map =
-    if StringMap.mem k map && StringMap.find k map <> v then
-      raise (TypeException (info, "two different bindings?"))
-    else
-      StringMap.add k v map
-  in
-  StringMap.fold add_item map1 map2
-
-let munion info =
-  List.fold_left (munion' info) StringMap.empty
-
 (* for now, just return type of underlying expression.  Later, need to modify ast*)
 let rec typecheck_exp gamma expr =
   match expr with
     | EVar (info, id) ->
       let s = Id.string_of_t id in
       if StringMap.mem s gamma then
-        (gamma, ConstraintSet.empty, StringMap.find s gamma)
+        (ConstraintSet.empty, StringMap.find s gamma)
       else
         raise (TypeException (info, "Unbound value " ^ s))
     | EApp (info, expr1, expr2) ->
       let resultant_type = fresh () in
-      let (gamma1, constraints1, typ1) =
+      let (constraints1, typ1) =
           typecheck_exp gamma expr1 in
-      let (gamma2, constraints2, typ2) =
+      let (constraints2, typ2) =
           typecheck_exp gamma expr2 in
       let constraints' =
           cunion [
@@ -83,49 +70,50 @@ let rec typecheck_exp gamma expr =
               ConstraintSet.singleton
                   (typ1, TFunction (typ2, resultant_type))]
       in
-      let gamma' = munion info [gamma1; gamma2] in
-      (gamma', constraints', resultant_type)
-    | EFun (info, param, expr) -> (gamma, ConstraintSet.empty, TUnit)
+      (constraints', resultant_type)
+    | EFun (info, param, expr) -> (ConstraintSet.empty, TUnit)
     | ELet (info, bind, expr) ->
-      match bind with
+      (match bind with
         | Bind (info, pattern, typ, expr') ->
-          let (gamma', constraints, expr'_t) = typecheck_exp gamma expr' in
+          let (constraints, expr'_t) = typecheck_exp gamma expr' in
           match pattern with
-            | PVar (_, Id(info, mo, s), _) ->
-              let gamma' = StringMap.add s expr'_t in
+            | PVar (_, (info, mo, s), _) ->
+              let gamma' = StringMap.add s expr'_t gamma in
               typecheck_exp gamma' expr
-            | _ -> raise TypeException(info, "pattern not a variable")
+            | _ -> raise (TypeException(info, "pattern not a variable")))
     | EAsc (info, expr, typ) ->
-      let (gamma', constraints, expr_t) = typecheck_exp gamma expr in
-      (gamma',
-        cunion [constraints; ConstraintSet.singleton((expr_t, typ))],
+      let (constraints, expr_t) = typecheck_exp gamma expr in
+      (cunion [constraints; ConstraintSet.singleton((expr_t, typ))],
         expr_t)
-    | EOver (info, op, exprs) -> (gamma, ConstraintSet.empty, TUnit)
+    | EOver (info, op, exprs) ->
+        raise (TypeException(info, "Overloaded operators not implemented"))
 
     | EPair (info, expr1, expr2) ->
-      let (gamma1, constraints1, typ1) =
+      let (constraints1, typ1) =
           typecheck_exp gamma expr1 in
-      let (gamma2, constraints2, typ2) =
+      let (constraints2, typ2) =
           typecheck_exp gamma expr2 in
-      (munion info [gamma1; gamma2],
-        cunion [constraints1; constraints2]
-        Tproduct (typ1, typ2))
-    | ECase (info, expr1, pat_exprs) -> (gamma, ConstraintSet.empty, TUnit)
+      (cunion [constraints1; constraints2], TProduct (typ1, typ2))
+    | ECase (info, expr1, pat_exprs) ->
+      raise (TypeException(info, "Case operator not implemented"))
 
-    | EUnit (info) -> (gamma, ConstraintSet.empty, TUnit)
-    | EBool (info, value) -> (gamma, ConstraintSet.empty, TBool)
-    | EInteger (info, value) -> (gamma, ConstraintSet.empty, TInteger)
-    | EChar (info, value) -> (gamma, ConstraintSet.empty, TChar)
-    | EString (info, value) -> (gamma, ConstraintSet.empty, TString)
+    | EUnit    (info)        -> (ConstraintSet.empty, TUnit)
+    | EBool    (info, value) -> (ConstraintSet.empty, TBool)
+    | EInteger (info, value) -> (ConstraintSet.empty, TInteger)
+    | EChar    (info, value) -> (ConstraintSet.empty, TChar)
+    | EString  (info, value) -> (ConstraintSet.empty, TString)
 
 let typecheck_decl (gamma, constraints) decl =
   match decl with
     | DLet (info, bind) ->
       (match bind with 
         | Bind (info, pattern, typopt, exp) ->
-          let (gamma, constraints, t) =
+          let (constraints, t) =
               typecheck_exp gamma exp in
-          (gamma, constraints))
+          match pattern with
+            | PVar (_, (info', mo, s), _) ->
+              (StringMap.add s t gamma, constraints)
+            | _ -> raise (TypeException(info, "pattern is not a variable")))
 
     | DType (info, ids, id, labels) ->
       (*TODO(astory)*)
