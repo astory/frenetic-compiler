@@ -45,8 +45,35 @@ type constrt = ConstraintSet.t
 let fresh () =
   TVar (Info.M ("what do I put here?"), None, "a fresh variable")
 
-let cunion =
-  List.fold_left (ConstraintSet.union) ConstraintSet.empty
+let cunion = List.fold_left (ConstraintSet.union) ConstraintSet.empty
+
+let cadd t1 t2 = ConstraintSet.add (t1, t2)
+
+let ceq t1 t2 = ConstraintSet.singleton (t1, t2)
+
+let c0 = ConstraintSet.empty
+
+let rec assign_types (gamma, constraints) info pattern t =
+    match pattern with
+      | PWild (info') -> (gamma, constraints)
+      | PUnit (info') -> (gamma, cadd TUnit t constraints)
+      | PBool (info', _) -> (gamma, cadd TBool t constraints)
+      | PInteger (info', _) -> (gamma, cadd TInteger t constraints)
+      | PString (info', _) -> (gamma, cadd TString t constraints)
+      | PVar (_, (info', mo, s), typ_opt) ->
+        (match typ_opt with
+          | Some t' -> (StringMap.add s t gamma, cadd t' t constraints)
+          | None -> (StringMap.add s t gamma, constraints))
+      (*| PData (info, id, pattern) *)
+      | PPair (info, p1, p2) ->
+          (match t with
+            | TProduct(t1, t2) ->
+                let (gamma', constraints') =
+                    assign_types (gamma, constraints) info p1 t1 in
+                assign_types (gamma', constraints') info p2 t2
+            | _ -> raise (TypeException(info, "type is not a product")))
+      | _ -> raise (TypeException(info, "PData not supported"))
+
 
 (* for now, just return type of underlying expression.  Later, need to modify ast*)
 let rec typecheck_exp gamma expr =
@@ -54,67 +81,70 @@ let rec typecheck_exp gamma expr =
     | EVar (info, id) ->
       let s = Id.string_of_t id in
       if StringMap.mem s gamma then
-        (ConstraintSet.empty, StringMap.find s gamma)
+        (StringMap.find s gamma, c0)
       else
         raise (TypeException (info, "Unbound value " ^ s))
     | EApp (info, expr1, expr2) ->
       let resultant_type = fresh () in
-      let (constraints1, typ1) =
+      let (typ1, constraints1) =
           typecheck_exp gamma expr1 in
-      let (constraints2, typ2) =
+      let (typ2, constraints2) =
           typecheck_exp gamma expr2 in
       let constraints' =
           cunion [
               constraints1;
               constraints2;
-              ConstraintSet.singleton
-                  (typ1, TFunction (typ2, resultant_type))]
+              ceq typ1 (TFunction (typ2, resultant_type))]
       in
-      (constraints', resultant_type)
-    | EFun (info, param, expr) -> (ConstraintSet.empty, TUnit)
+      (resultant_type, constraints')
+    | EFun (info, param, expr) ->
+        (match param with
+          | Param (param_info, pattern, typ) ->
+            let t1 = fresh() in
+            let constraints = (match typ with
+              | Some t -> ceq t1 t
+              | None -> c0) in
+            let (gamma', constraints') =
+                (* TODO(astory): make work for pairs without explicitness *)
+                assign_types (gamma, constraints) param_info pattern t1
+            in
+            let (t, constraints'') = typecheck_exp gamma' expr in
+            (TFunction(t1, t), cunion [constraints''; constraints']))
     | ELet (info, bind, expr) ->
       (match bind with
         | Bind (info, pattern, typ, expr') ->
-          let (constraints, expr'_t) = typecheck_exp gamma expr' in
-          match pattern with
-            | PVar (_, (info, mo, s), _) ->
-              let gamma' = StringMap.add s expr'_t gamma in
-              typecheck_exp gamma' expr
-            | _ -> raise (TypeException(info, "pattern not a variable")))
+          let (expr'_t, constraints) = typecheck_exp gamma expr' in
+          let (gamma', constraints') =
+                assign_types (gamma, constraints) info pattern expr'_t in
+          typecheck_exp gamma' expr)
     | EAsc (info, expr, typ) ->
-      let (constraints, expr_t) = typecheck_exp gamma expr in
-      (cunion [constraints; ConstraintSet.singleton((expr_t, typ))],
-        expr_t)
+      let (expr_t, constraints) = typecheck_exp gamma expr in
+      (expr_t, cadd expr_t typ constraints)
     | EOver (info, op, exprs) ->
         raise (TypeException(info, "Overloaded operators not implemented"))
 
     | EPair (info, expr1, expr2) ->
-      let (constraints1, typ1) =
+      let (typ1, constraints1) =
           typecheck_exp gamma expr1 in
-      let (constraints2, typ2) =
+      let (typ2, constraints2) =
           typecheck_exp gamma expr2 in
-      (cunion [constraints1; constraints2], TProduct (typ1, typ2))
+      (TProduct (typ1, typ2), cunion [constraints1; constraints2])
     | ECase (info, expr1, pat_exprs) ->
       raise (TypeException(info, "Case operator not implemented"))
 
-    | EUnit    (info)        -> (ConstraintSet.empty, TUnit)
-    | EBool    (info, value) -> (ConstraintSet.empty, TBool)
-    | EInteger (info, value) -> (ConstraintSet.empty, TInteger)
-    | EChar    (info, value) -> (ConstraintSet.empty, TChar)
-    | EString  (info, value) -> (ConstraintSet.empty, TString)
+    | EUnit    (info)        -> (TUnit,    ConstraintSet.empty)
+    | EBool    (info, value) -> (TBool,    ConstraintSet.empty)
+    | EInteger (info, value) -> (TInteger, ConstraintSet.empty)
+    | EChar    (info, value) -> (TChar,    ConstraintSet.empty)
+    | EString  (info, value) -> (TString,  ConstraintSet.empty)
 
 let typecheck_decl (gamma, constraints) decl =
   match decl with
     | DLet (info, bind) ->
       (match bind with 
         | Bind (info, pattern, typopt, exp) ->
-          let (constraints, t) =
-              typecheck_exp gamma exp in
-          match pattern with
-            | PVar (_, (info', mo, s), _) ->
-              (StringMap.add s t gamma, constraints)
-            | _ -> raise (TypeException(info, "pattern is not a variable")))
-
+          let (t, constraints) = typecheck_exp gamma exp in
+          assign_types (gamma, constraints) info pattern t)
     | DType (info, ids, id, labels) ->
       (*TODO(astory)*)
       (gamma, constraints)
@@ -123,4 +153,6 @@ let typecheck_modl = function
   | Modl (info, m, ds) ->
     let gamma = StringMap.empty in
     let constraints = ConstraintSet.empty in
-    List.fold_left typecheck_decl (gamma, constraints) ds
+    let (gamma', constraints') =
+        List.fold_left typecheck_decl (gamma, constraints) ds in
+    ()
