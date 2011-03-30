@@ -28,6 +28,7 @@
 (* Type checking for the Frenetic syntax                                      *)
 (* $Id$ *)
 (******************************************************************************)
+(*TODO(astory): useful errors*)
 module StringMap = Map.Make (String)
 include Syntax
 module ConstraintSet = Set.Make (
@@ -52,6 +53,26 @@ let cadd t1 t2 = ConstraintSet.add (t1, t2)
 let ceq t1 t2 = ConstraintSet.singleton (t1, t2)
 
 let c0 = ConstraintSet.empty
+
+let fv var typ =
+    (*TODO(astory)*)
+    false
+
+let rec unify cs =
+    if ConstraintSet.is_empty cs then StringMap.empty
+    else
+        let (s,t) = ConstraintSet.choose cs in
+        let cs' = ConstraintSet.remove (s,t) cs in
+        if s == t then
+            unify cs'
+        else match (s,t) with
+          | (TVar(_,_,var), _) when not (fv var t) ->
+            StringMap.add var t (unify (cadd s t cs')) (*TODO(astory): ask about*)
+          | (_, TVar(_,_,var)) when not (fv var s) ->
+            StringMap.add var s (unify (cadd t s cs')) (*TODO(astory): ask about*)
+          | (TFunction(s1,s2),TFunction(t1,t2)) ->
+            unify (cunion [cs'; ceq s1 t1; ceq s2 t2])
+          | _ -> raise (TypeException (Info.M (""), "Could not unify"))
 
 let rec assign_types (gamma, constraints) info pattern t =
     match pattern with
@@ -153,6 +174,7 @@ let typecheck_modl = function
   | Modl (info, m, ds) ->
     let gamma = StringMap.empty in
     let constraints = ConstraintSet.empty in
-    let (gamma', constraints') =
+    let (_, constraints') =
         List.fold_left typecheck_decl (gamma, constraints) ds in
+    let sigma = unify constraints' in
     ()
